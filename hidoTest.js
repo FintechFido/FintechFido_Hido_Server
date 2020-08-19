@@ -1,9 +1,11 @@
+const path = require("path");
 var http = require('http');
 var https = require('https');
 var fs = require('fs');
 var express = require("express"); // npm install express
 const request = require("request");
 var mysql = require("mysql");
+var crypto = require('crypto');
 //promise, pm2, async 사용법
 
 var app = express();
@@ -171,6 +173,45 @@ app.post("/registration/key", function (req, res) {
     } else {
         console.log("error");
     }
+});
+
+/*========================= 지문 인증 프로세스 ======================================*/
+
+//3. DB에 IMEI가 있는지 확인 -> 있으면 bankapp 서버에서 CI값 가져오기
+app.get("/auth", function(req, res){
+    //client로부터 받은 IMEI, H(sessionKey)임시로 넣어둠.
+    //인자 : H(Session Key), IMEI, 구동 중인 앱의 은행코드, 정보가 저장된 은행코드
+    var testSession = 'test';
+    var testIMEI = '1234';
+    var hash_sessionKey=(crypto.createHash('sha512').update(String(testSession)).digest('base64'));
+    var hash_IMEI = (crypto.createHash('sha512').update(String(testIMEI)).digest('base64'));
+    var curBankCode = '001';
+    var saveBankCode = '002';
+
+    var sql = "SELECT * FROM hido.key WHERE IMEI = ? AND bankcode = ?";
+    connection.query(
+        sql,[hash_IMEI, curBankCode],function(error, results){
+            if(error)   throw error;
+            else{
+                var CI = results[0].CI;
+                var randomNum = Math.floor(Math.random()*1000)+1;//랜덤으로 챌린지 넘버 생성 
+                var challengeNum=(crypto.createHash('sha512').update(String(randomNum)).digest('base64'));//암호화
+
+                console.log(CI, curBankCode, saveBankCode, hash_sessionKey, challengeNum);
+
+                //4. DB 데이터 추가하고 5.challengeNum 반환
+                sql2 = "INSERT INTO certification (`CI`,`useBankCode`,`saveBankCode`, `sessionKey`,`challengeNum`) VALUE (?,?,?,?,?);"
+                connection.query(
+                    sql2,[CI, curBankCode, saveBankCode, hash_sessionKey, challengeNum], function(error, results){
+                        if(error)   throw error;
+                        else{
+                            console.log("db certification에 데이터 넣었음");
+                            var jsonData={"challengeNum":challengeNum};
+                            res.send(jsonData);
+                        }
+                    });
+            }
+    });
 });
 
 var httpsServer = https.createServer(credentials, app);
