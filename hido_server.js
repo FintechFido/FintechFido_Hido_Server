@@ -63,7 +63,7 @@ app.get("/registration/fingerprint", function(req, res){
                 if(results.length == 0){
                     console.log("등록이 안된 IEMI -> fingertable에 등록");
 
-                    var sql2 = "INSERT INTO fingerprint (`bankcode`, `sessionKey`) VALUES (?,?)";
+                    var sql2 = "INSERT INTO fingerprint (`curBankCode`, `sessionKey`) VALUES (?,?)";
                         connection.query(
                             sql2,[curBankCode, hash_sessionKey], function(err, results){
                                 if(err) throw err;
@@ -78,7 +78,7 @@ app.get("/registration/fingerprint", function(req, res){
                 else{
                     console.log("이미 등록된거");
                     var dbIMEI = results[0].IMEI;
-                    var dbBankCode=results[0].bankcode;
+                    var dbBankCode=results[0].curBankCode;
 
                     if(dbIMEI==hash_IMEI && dbBankCode==curBankCode){
                         //3번 프로세스 -> bankapp서버에서 ci값 반환
