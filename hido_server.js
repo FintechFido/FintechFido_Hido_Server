@@ -1,44 +1,58 @@
-const path = require("path");
 var http = require('http');
 var https = require('https');
 var fs = require('fs');
 var express = require("express"); // npm install express
 const request = require("request");
-var bodyParser = require('body-parser');
-var crypto = require('crypto');
 var mysql = require("mysql");
-const { isNull } = require('util');
-const { response } = require('express');
-
-var connection = mysql.createConnection({//local DB에 연결(TEST)
-    host: "localhost",
-    user: "root",
-    password: "8603",
-    database: "hido",
-    port: "3306"
-});
-
-connection.connect();
-
-process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0'; //crt의 self-signed 문제 해결
-
-var key = fs.readFileSync('./keys/hido/hidopr.pem', 'utf-8');
-var certificate =  fs.readFileSync('./keys/hido/hido_server.crt', 'utf-8');
-var credentials = {key: key, cert: certificate};
+//promise, pm2, async 사용법
 
 var app = express();
-
 app.use(express.json());
 
-app.set('views', __dirname + '/views');
-app.set('view engine', 'ejs');
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0"; //crt의 self-signed 문제 해결
 
-app.use(express.static(path.join(__dirname, "public"))); //to use static asset
+var key = fs.readFileSync('./keys/hidopr.pem', 'utf-8');
+var certificate = fs.readFileSync('./keys/hido_server.crt', 'utf-8');
+var credentials = { key: key, cert: certificate };
+
+//원래는 hidoDB가 아니라 key/certification/fingerprint DB 3개로 나눠줘야함.
+//우선 hidoDB내에 table3개로 구성
+var connection = mysql.createConnection({//local db
+    host: "127.0.0.1", //localhost
+    user: "root",
+    password: "1234",
+    database: "hido",
+    port: "3306"
+    // multipleStatements: true  // 다중쿼리용 설정
+});
+connection.connect();
+// connection.release();
+
+app.get("/get_test", function (req, res) {
+    console.log("get");
+    res.writeHead(200);
+    res.end("GET Success");
+})
+
+app.post("/post_test", function (req, res) {
+    console.log(req.body);
+    res.send("Post Success");
+})
 
 request.defaults({ //rejectUnauthorized를 false값으로 두어야 https 서버통신 가능
     strictSSL: false, // allow us to use our self-signed cert for testing
     rejectUnauthorized: false
 });
+
+/* request 예시
+request('https://127.0.0.1:3000/get_test', //localhost
+    function (error, response, body) {
+        console.error('error:', error); // Print the error if one occurred
+        console.log('statusCode:', response && response.statusCode); // Print the response status code if a response was received
+        console.log('body:', body); // Print the HTML for the Google homepage.
+    }); //bankapp 서버에서 보낸 값을 받아옴
+// fs.createReadStream('file.json').pipe(request.put('http://mysite.com/obj.json'))
+*/
 
 //2. IMEI와 구동 은행 앱 코드에 해당되는 데이터 있으면 FALSE, 없으면 진행 -> sessionKey 전달
 app.get("/registration/fingerprint", function(req, res){
@@ -120,18 +134,45 @@ app.get("/registration/fingerprint", function(req, res){
         });  
 });
 
-// =============================== get/post test ====================================
-app.get("/get_test", function(req,res){
-    console.log("get");
-    res.writeHead(200);
-    res.end("GET Success");
-})
 
-app.post("/post_test", function(req,res){
-    console.log(req.body);
-    res.send("Post Success");
-})
+//8.client에서 받은 publicKey 분할 ->추후에 client에서 받아오는 request문 작성해줘야함
+app.post("/registration/key", function (req, res) {
+    global.publicKey = 'a1b2c3d4'; //publickey는 client을 거쳐서 넘어옴(우선 임의로 지정)
+
+    if (publicKey != null) {
+        var a = (publicKey.length) / 2;
+        global.publicKeyA = publicKey.substr(0, a); //A는 hidoDB에 저장
+        global.publicKeyB = publicKey.substr(a,); //B는 fidoDB에 저장
+        
+        } else {
+        console.log("publickey 없음");
+    }
+
+/*9.db 데이터 추가&삭제
+fingerprint table에서 은행코드, Session Key로 검색해서 CI 값 얻기
+CI와 연결된 PublicKeyA key table에 추가(update)*/
+
+    if (sessionKey != null && bankcode != null && CI != null) {
+        var sqls = "SELECT * FROM fingerprint WHERE sessionKey = ? AND bankcode = ?;"
+                    +"UPDATE key SET publicKeyA = ? WHERE CI = ?;";
+        connection.query(
+            sqls, [sessionKey, bankcode, publicKeyA, CI], function (error, results) {
+                if (error) throw error;
+                else {
+                    console.log(results);
+                    var sessionKey = results[0].sessionKey;
+                    var dbBankCode = results[0].bankcode;
+                    var dbCI = results[0].CI;
+                    
+                    var jsonDataTofido = {"publicKeyB": publicKeyB, "CI": dbCI};
+                    res.send(jsonDataTofido); //fido에 CI, publicKeyB를 넘겨줘야함
+                }
+            });
+    } else {
+        console.log("error");
+    }
+});
 
 var httpsServer = https.createServer(credentials, app);
 httpsServer.listen(3002);
-console.log('HIDO_Server running');
+console.log('Server running');
