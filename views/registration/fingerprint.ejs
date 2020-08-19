@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="ie=edge">
+    <title>Document</title>
+</head>
+<body>
+    <h1>Registration/fingerprint</h1>
+        <p>
+        <input type="text" id="userbankcode" placeholder="bankcode">
+        </p>
+        <p>
+        <input type="text" id="usersessionKey" placeholder="sessionKey">
+        </p>
+        <p>
+        <input type="text" id="userIMEI" placeholder="IMEI">
+        </p>
+
+        <p>  
+        <button type="button" id="regiBtn">REGI</button>
+        </p>
+
+    <!-- JQuery library file. requared all pages -->
+    <script src="public/js/jquery-3.2.1.min.js"></script>
+
+    <script>
+        $("#regiBtn").click(function(){
+            var userci = $("#userbankcode").val();
+            var usersessionKey = $("#usersessionKey").val();
+            var userIMEI = $("#userIMEI").val();
+
+            $.ajax({
+                url:'/fingerprint',
+                type : 'POST',
+                data : {
+                    userbankcode:userbankcode,
+                    usersessionKey:usersessionKey,
+                    userIMEI:userIMEI,
+                },
+                success:function(data){
+                    console.log("fingerprint connecting...");
+                }
+            })
+        });
+    </script>
+</body>
+</html>

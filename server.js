@@ -1,3 +1,4 @@
+const path = require("path");
 var http = require('http');
 var https = require('https');
 var fs = require('fs');
@@ -29,6 +30,10 @@ var app = express();
 
 app.use(express.json());
 
+app.set('views', __dirname + '/views');
+app.set('view engine', 'ejs');
+
+app.use(express.static(path.join(__dirname, "public"))); //to use static asset
 
 request.defaults({ //rejectUnauthorized를 false값으로 두어야 https 서버통신 가능
     strictSSL: false, // allow us to use our self-signed cert for testing
@@ -36,85 +41,86 @@ request.defaults({ //rejectUnauthorized를 false값으로 두어야 https 서버
 });
 
 //2. IMEI와 구동 은행 앱 코드에 해당되는 데이터 있으면 FALSE, 없으면 진행 -> sessionKey 전달
-app.post("/registration/fingerprint", function(req, res){
+app.get("/registration/fingerprint", function(req, res){
     //유저가 HIDO 서버에 생체정보 등록 요청
 
     //임시로 넣어둠.
-    var sessionKey='d4nu/BE1tZenlaXDS8jjWe9NdF/g0N5MhIbni+ang+pXO/tGQHDEF1QG8Qt+i9Oc3G/Xe0aj1/1a1irAslS4Xw==';
+    var testSession = 'test';
+    var testIMEI = '1234';
+    var hash_sessionKey=(crypto.createHash('sha512').update(String(testSession)).digest('base64'));
     var curBankCode='001';//현재 구동중인 은행 앱 코드
-    var IMEI = '1234';
+    var hash_IMEI = (crypto.createHash('sha512').update(String(testIMEI)).digest('base64'));
+    //var hash_IMEI = testIMEI;//test값 -> db에 존재함.
 
-    if(sessionKey!=null)
-    {
-        var sql="SELECT * FROM key WHERE IMEI=? AND bankcode = ?";
-        connection.query(
-            sql,[IMEI, curBankCode], function(error, results){
-                if(error)   throw error;
+    console.log('hash_IMEI', hash_IMEI);
+
+    //key table에서 IMEI가 있는지 먼저 검사, 없으면 fingerprint table에 은행코드랑 sessionKey 등록
+    var sql = "SELECT * FROM hido.key WHERE IMEI = ?";
+    connection.query(
+        sql,[hash_IMEI, curBankCode], function(error, results){
+            if(error)   throw error;
+            else{
+                if(results.length == 0){
+                    console.log("등록이 안된 IEMI -> fingertable에 등록");
+
+                    var sql2 = "INSERT INTO fingerprint (`bankcode`, `sessionKey`) VALUES (?,?)";
+                        connection.query(
+                            sql2,[curBankCode, hash_sessionKey], function(err, results){
+                                if(err) throw err;
+                                else{
+                                    console.log("fingerprint table에 등록 완료");
+                                    var jsonData={"sessionKey":hash_sessionKey, "bankcode":curBankCode};
+                                    res.send(jsonData);
+                                }
+                            }
+                        )
+                }
                 else{
+                    console.log("이미 등록된거");
                     var dbIMEI = results[0].IMEI;
                     var dbBankCode=results[0].bankcode;
 
-                    if(dbIMEI==IMEI && dbBankCode==curBankCode){
-                        console.log("False");
-                        var jsonData={"sessionKey":null, "bankcode":null};
+                    if(dbIMEI==hash_IMEI && dbBankCode==curBankCode){
+                        //3번 프로세스 -> bankapp서버에서 ci값 반환
+                        var jsonData={"sessionKey":hash_sessionKey, "bankcode":curBankCode};
                         res.send(jsonData);
-                    }else{
-                        console.log("진행");
-                        var jsonData={"sessionKey":sessionKey, "bankcode":curBankCode};
-                        res.send(jsonData);
-                        console.log(jsonData);
                     }
                 }
-            });
-    }else{
-        console.log("key를 받아오지 못했음. False");
-        var jsonData={"sessionKey":null, "bankcode":null};
-        res.send(jsonData);
-    }
+
+                //3.bankapp 서버에 SessionKey 전달해서 CI 값 받아오기
+                console.log("3번 프로세스...");
+                request('https://127.0.0.1:3000/registration/fingerprint', function (error, response, body) {
+                    //console.error('error:', error);
+                    //console.log('statusCode:', response && response.statusCode); 
+                    console.log('body:', body);
+
+                    if (!error && response.statusCode == 200){
+                        var data = JSON.parse(body);
+                        console.log(data);
+
+                        //이미 다 hash된 값이 넘어옴.
+                        var CI = data.CI;
+                        var sessionKey=data.sessionKey;
+                        var bankcode=data.bankcode;
+                    
+                        console.log("5번 프로세스...");
+                        //5. DB 데이터(fingertable) 수정, sessionKey로 검색해서 CI 값 추가.                 
+                        var sql = "UPDATE fingerprint SET CI = ? WHERE sessionKey = ?";
+                        connection.query(
+                            sql,[CI, sessionKey],function(error, results){
+                                if(error)   throw error;
+                                else{
+                                    console.log("update ci fingerprint table");
+                                }
+                        });
+                        
+                    }
+                });
+            }
+        });  
 });
 
-//3.bankapp 서버에 SessionKey 전달해서 CI 값 받아오기
-request('https://127.0.0.1:3000/registration/fingerprint', function (error, response, body) {
-        //console.error('error:', error);
-        //console.log('statusCode:', response && response.statusCode); 
-        console.log('body:', body);
-
-        if (!error && response.statusCode ==200){
-            var data = JSON.parse(body);
-            console.log(data);
-
-            var sessionKey = data.sessionKey;
-            var CI = data.CI;
-            var bankcode=data.bankcode;
-        
-            //5. DB 데이터 수정, sessionKey로 검색해서 CI 값 추가.
-            app.post("/registration/fingerprint", function(req, res){
-                var sql = "UPDATE fingerprint SET CI = ? WHERE sessionKey = ?";
-                connection.query(
-                    sql,[CI, sessionKey],function(error, results){
-                        if(error)   throw error;
-                        else{
-                            console.log("update ci fingerprint table");
-                            var dbSessionKey=results[0].sessionKey;
-                            var dbBankCode=results[0].bankcode;
-    
-                            console.log(dbSessionKey, dbBankCode);
-    
-                            if(dbSessionKey==sessionKey&&dbBankCode==bankcode){
-                                console.log("fingerprint table에 CI값 등록");
-                                res.send(1);
-                            }
-                            else{
-                                console.log("false");
-                            }
-                        }
-                });
-            });
-        }
-}); 
-
-app.post("regi")
-
+// =============================== get/post test ====================================
 app.get("/get_test", function(req,res){
     console.log("get");
     res.writeHead(200);
