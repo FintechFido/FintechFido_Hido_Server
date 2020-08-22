@@ -23,7 +23,7 @@
         </p>
 
     <!-- JQuery library file. requared all pages -->
-    <script src="public/js/jquery-3.2.1.min.js"></script>
+    <script src="hido_server/public/js/jquery-3.2.1.min.js"></script>
 
     <script>
         $("#regiBtn").click(function(){
@@ -32,7 +32,7 @@
             var userIMEI = $("#userIMEI").val();
 
             $.ajax({
-                url:'/fingerprint',
+                url:'/registration/fingerprint',
                 type : 'POST',
                 data : {
                     userbankcode:userbankcode,
