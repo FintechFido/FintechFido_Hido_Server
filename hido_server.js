@@ -4,6 +4,9 @@ var fs = require('fs');
 var express = require("express"); // npm install express
 const request = require("request");
 var mysql = require("mysql");
+const aes256 = require('aes256');
+var crypto = require('crypto');
+
 //promise, pm2, async 사용법
 
 var app = express();
@@ -11,8 +14,8 @@ app.use(express.json());
 
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0"; //crt의 self-signed 문제 해결
 
-var key = fs.readFileSync('./keys/hido/hidopr.pem', 'utf-8');
-var certificate = fs.readFileSync('./keys/hido/hido_server.crt', 'utf-8');
+var key = fs.readFileSync('./keys/hidopr.pem', 'utf-8');
+var certificate = fs.readFileSync('./keys/hido_server.crt', 'utf-8');
 var credentials = { key: key, cert: certificate };
 
 //원래는 hidoDB가 아니라 key/certification/fingerprint DB 3개로 나눠줘야함.
@@ -20,39 +23,21 @@ var credentials = { key: key, cert: certificate };
 var connection = mysql.createConnection({//local db
     host: "127.0.0.1", //localhost
     user: "root",
-    password: "8603",
+    password: "1234",
     database: "hido",
     port: "3306"
-    // multipleStatements: true  // 다중쿼리용 설정
+    // multipleStatements: true  // 다중쿼리용 설정(지금안됨ㅠ)
 });
 connection.connect();
 // connection.release();
 
-app.get("/get_test", function (req, res) {
-    console.log("get");
-    res.writeHead(200);
-    res.end("GET Success");
-})
-
-app.post("/post_test", function (req, res) {
-    console.log(req.body);
-    res.send("Post Success");
-})
 
 request.defaults({ //rejectUnauthorized를 false값으로 두어야 https 서버통신 가능
     strictSSL: false, // allow us to use our self-signed cert for testing
     rejectUnauthorized: false
 });
 
-/* request 예시
-request('https://127.0.0.1:3000/get_test', //localhost
-    function (error, response, body) {
-        console.error('error:', error); // Print the error if one occurred
-        console.log('statusCode:', response && response.statusCode); // Print the response status code if a response was received
-        console.log('body:', body); // Print the HTML for the Google homepage.
-    }); //bankapp 서버에서 보낸 값을 받아옴
-// fs.createReadStream('file.json').pipe(request.put('http://mysite.com/obj.json'))
-*/
+/*========================= 지문 등록 프로세스 ======================================*/
 
 //2. IMEI와 구동 은행 앱 코드에 해당되는 데이터 있으면 FALSE, 없으면 진행 -> sessionKey 전달
 app.get("/registration/fingerprint", function(req, res){
@@ -102,7 +87,7 @@ app.get("/registration/fingerprint", function(req, res){
                 }
 
                 //3.bankapp 서버에 SessionKey 전달해서 CI 값 받아오기
-                console.log("3번 프로세스...");
+                console.log("3번 프로세스");
                 request('https://127.0.0.1:3000/registration/fingerprint', function (error, response, body) {
                     //console.error('error:', error);
                     //console.log('statusCode:', response && response.statusCode); 
@@ -117,7 +102,7 @@ app.get("/registration/fingerprint", function(req, res){
                         var sessionKey=data.sessionKey;
                         var bankcode=data.bankcode;
                     
-                        console.log("5번 프로세스...");
+                        console.log("5번 프로세스");
                         //5. DB 데이터(fingertable) 수정, sessionKey로 검색해서 CI 값 추가.                 
                         var sql = "UPDATE fingerprint SET CI = ? WHERE sessionKey = ?";
                         connection.query(
@@ -135,39 +120,42 @@ app.get("/registration/fingerprint", function(req, res){
 });
 
 
-//8.client에서 받은 publicKey 분할 ->추후에 client에서 받아오는 request문 작성해줘야함
-app.post("/registration/key", function (req, res) {
+//8.client에서 받은 publicKey 분할 ->추후에 client에서 받아오는 request문 작성해줘야함 + 암호화
+app.get("/registration/key", function (req, res) {
     global.publicKey = 'a1b2c3d4'; //publickey는 client을 거쳐서 넘어옴(우선 임의로 지정)
 
     if (publicKey != null) {
         var a = (publicKey.length) / 2;
         global.publicKeyA = publicKey.substr(0, a); //A는 hidoDB에 저장
         global.publicKeyB = publicKey.substr(a,); //B는 fidoDB에 저장
-        
-        } else {
-        console.log("publickey 없음");
-    }
 
-    /*9.db 데이터 추가&삭제
-    fingerprint table에서 은행코드, Session Key로 검색해서 CI 값 얻기
-    CI와 연결된 PublicKeyA key table에 추가(update)*/
+/*9.db 데이터 추가&삭제
+DB의 fingerprint table에서 은행코드, Session Key로 검색해서 CI 값 얻기
+CI와 연결된 PublicKeyA key table에 추가(update)*/
+        var sessionKey = 'tjLu+BFQTGEi5iyMGE+Eu6qthLDmE/XbyilK9Qx2RH41PgCQi4r/ZXGPV995ctUGpakcB7e7WH8OZZ5EJreDtA==';
+        var bankcode = '001';
+        var CI = 'pXfDJK18dEvBbHnSUtgzKP19uxCK2C6/xbDU1AhC0CtLWAL0EeAVIMeExyzw0uxwtZ6tjTIVDVQiH/w7OE3/eg=='; 
+        //이부분 나중에 변경해야함
 
-    if (sessionKey != null && bankcode != null && CI != null) {
-        var sqls = "SELECT * FROM fingerprint WHERE sessionKey = ? AND bankcode = ?;"
-                    +"UPDATE key SET publicKeyA = ? WHERE CI = ?;";
-        connection.query(
-            sqls, [sessionKey, bankcode, publicKeyA, CI], function (error, results) {
+        var sql1 = "SELECT * FROM fingerprint WHERE sessionKey = ? AND bankcode = ?;"
+        connection.query(sql1, [sessionKey, bankcode], function (error, results) {
                 if (error) throw error;
                 else {
-                    console.log(results);
                     var sessionKey = results[0].sessionKey;
                     var dbBankCode = results[0].bankcode;
                     var dbCI = results[0].CI;
-                    
-                    var jsonDataTofido = {"publicKeyB": publicKeyB, "CI": dbCI};
-                    res.send(jsonDataTofido); //fido에 CI, publicKeyB를 넘겨줘야함
+                    console.log('CI 찾았다');
                 }
             });
+        var sql2 = "UPDATE key SET publicKeyA = ? WHERE CI = ?;"
+        connection.query(sql2, [publicKeyA, CI], function (error, results) {
+                if (error) throw error;
+                else {
+                    var dbCI = results[0].CI;
+                    var jsonDataTofido = {"publicKeyB": publicKeyB, "CI": dbCI};
+                    res.send(jsonDataTofido); //fido에 CI, publicKeyB를 넘겨줘야함
+        }
+    });
     } else {
         console.log("error");
     }
