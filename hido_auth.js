@@ -56,23 +56,23 @@ app.get("/auth", function (req, res) {
             if (error) throw error;
             else {
                 var CI = results[0].CI;
-                var randomNum = Math.floor(Math.random() * 1000) + 1;//랜덤으로 챌린지 넘버 생성
-                var pr = './keys/hidopr.pem'                         
+                var randomNum = String(Math.floor(Math.random() * 1000) + 1);//랜덤으로 챌린지 넘버 생성
+                var pr = fs.readFileSync('./keys/hidopr.pem', 'utf-8');
                 var enChallengeNum = crypto.privateEncrypt(pr, Buffer.from(randomNum, 'utf-8')).toString('base64'); // 개인키로 암호화
-
-                console.log(CI, curBankCode, saveBankCode, hash_sessionKey, enchallengeNum);
+                var hash_enChallengeNum = (crypto.createHash('sha512').update(String(enChallengeNum)).digest('base64'));
+                // console.log(typeof hash_enChallengeNum);
+                console.log(CI, curBankCode, saveBankCode, hash_sessionKey, hash_enChallengeNum);
 
                 //4&5. DB 데이터 추가하고 challengeNum 반환
                 sql2 = "INSERT INTO certification (`CI`,`useBankCode`,`saveBankCode`, `sessionKey`,`challengeNum`) VALUE (?,?,?,?,?);"
-                connection.query(
-                    sql2, [CI, curBankCode, saveBankCode, hash_sessionKey, enchallengeNum], function (error, results) {
-                        if (error) throw error;
-                        else {
-                            console.log("db certification에 데이터 넣었음");
-                            var jsonData = { "challengeNum": enchallengeNum };
-                            res.send(jsonData);
-                        }
-                    });
+                connection.query(sql2, [CI, curBankCode, saveBankCode, hash_sessionKey, hash_enChallengeNum], function (error, results) {
+                    if (error) throw error;
+                    else {
+                        console.log("db certification에 데이터 넣었음");
+                        var jsonData = { "challengeNum": hash_enChallengeNum };
+                        res.send(jsonData);
+                    }
+                });
             }
         });
 });
@@ -91,11 +91,11 @@ request('https://127.0.0.1:3001/auth', function (error, response, body) {
         var publicKeyB = data.publicKeyB;
 
         if (publicKeyB != null) {//publickeyB를 certDB에 저장(인증후 삭제)
-            var sql = "UPDATE certification SET publicKeyB = ? WHERE CI = ?";
+            var sql = "UPDATE key SET publicKeyB = ? WHERE CI = ?";
             connection.query(sql, [publicKeyB, CI], function (error, results) {
                 if (error) throw error;
                 else {
-                    console.log("update cert table");
+                    console.log("update key table");
                 }
             })
         } else {
@@ -121,25 +121,50 @@ request('https://127.0.0.1:3001/auth', function (error, response, body) {
 
     /*챌린지넘버 복호화 후, 해시시켜서 certDB에 저장된 챌린지넘버와 비교
      HIDO 서버가 bankapp서버에 인증 결과 전송 */
-    var pu = './keys/hidopu.pem'    
-    //var enChallengeNum = ??
+    var pu = fs.readFileSync('./keys/pu.pem', 'utf-8');
+    var enChallengeNum = fs.readFileSync('./keys/test.txt', 'utf-8');//클라이언트에서 넘어오는 hash된 챌린지넘버(임의로 지정)
     var deChallengeNum = crypto.publicDecrypt(pu, Buffer.from(enChallengeNum, 'base64')); // 공개키로 복호화
     console.log("deChallengeNum : " + deChallengeNum.toString() + "\n");
     var hashChallengeNum = (crypto.createHash('sha512').update(String(deChallengeNum)).digest('base64')); //해시
+    console.log(hashChallengeNum);
 
     var sql = "SELECT * FROM certification WHERE CI = ?";
     connection.query(sql, [CI], function (error, results) {
         if (error) throw error;
         else {
+            var sessionKey = results[0].sessionKey;
+            var useBankCode = results[0].useBankCode;
+            var hash_IMEI = results[0].hash_IMEI;
+            var saveBankCode = results[0].saveBankCode;
             var challengeNum = results[0].challengeNum;
-            if (hashChallengeNum == challengeNum) {
-                console.log("AUTHENTICATION & TRANSFER: " + "Session Key [" + req.body.session_key + "]  Running App Code [" + req.body.running + "]  IMEI [" + req.body.imei + "]  Saved Bank code [" + req.body.saved + "]  Challenge number [" + req.body.challengeNum + "]");
 
+            if (hashChallengeNum == challengeNum) {
+                console.log("AUTHENTICATION & TRANSFER: " + "Session Key [" + sessionKey + "]  Use App Code [" + useBankCode
+                    + "]  IMEI [" + hash_IMEI + "]  Saved Bank code [" + saveBankCode + "]  Challenge number [" + challengeNum + "]");
+                sql2 = "UPDATE key SET publicKeyB = ? WHERE CI = ?"
+                connection.query(sql2, [" ", CI], function (error, results) {
+                    if (error) throw error;
+                    else {
+                        console.log("publicKeyB destoryed");
+                    }
+                });
+
+                var output = {
+                    "mode": "auth",
+                    "result": "true"
+                }
+                res.send(output);
             } else {
                 console.log("AUTHENTICATION - FAIL");
+                var output={
+                    "mode":"logout",
+                    "result":"false"
+                }
+                res.send(output);
             }
         }
     })
+
 });
 
 
