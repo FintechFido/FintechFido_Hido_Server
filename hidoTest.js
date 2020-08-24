@@ -21,7 +21,7 @@ app.use(express.static(path.join(__dirname, "public"))); //to use static asset
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0"; //crt의 self-signed 문제 해결
 
 var key = fs.readFileSync('./keys/hido/hidopr.pem', 'utf-8');
-var certificate = fs.readFileSync('./keys/hido/hido_server.crt', 'utf-8');
+var certificate = fs.readFileSync('./keys/dhido/hido_server.crt', 'utf-8');
 var credentials = { key: key, cert: certificate };
 
 //원래는 hidoDB가 아니라 key/certification/fingerprint DB 3개로 나눠줘야함.
@@ -53,21 +53,14 @@ app.get("/", function(req,res){
     res.send(output);
 });
 
-// app.get("/registration/fingerprint",function(req,res){
-//     console.log("fingerprint page");
-//     var input = {
-//         "sessionKey":"test",
-//         "running":"007",
-//         "imei" :"1234567"
-//     }
-//     res.send(input);
-// });
-
 //4-1. 지문등록 유무 확인 요청
-app.get("/registration/fingerprint", function(req, res){//->post로
-    // var sessionKey = req.body.sessionKey;
-    // var running = req.body.running;
-    // var hash_imei = req.body.imei;
+app.post("/registration/fingerprint", function(req, res){//->post로
+
+    console.log("REGISTER CHECK : "+"Session Key ["+req.body.session_key+"]  Running App Code ["+req.body.running+"]  IMEI ["+req.body.imei+"]");
+
+    var session_key = req.body.session_key;
+    var running = req.body.running;
+    var imei = req.body.imei;
 
     //임시 값.(이미 등록된 지문)
     // var session_key = 'test';
@@ -75,14 +68,14 @@ app.get("/registration/fingerprint", function(req, res){//->post로
     // var hash_imei = '1234567';
 
     //임시 값(등록되지 않은 지문)
-    var session_key = '12345';
-    var running = '006';
-    var hash_imei = '9876';
+    // var session_key = '12345';
+    // var running = '006';
+    // var imei = '9876';//얘는 평문으로 들어옴.
 
-    console.log("REGISTER CHECK : "+"Session Key ["+req.body.session_key+"]  Running App Code ["+req.body.running+"]  IMEI ["+req.body.imei+"]");
+    var hash_session_key = (crypto.createHash('sha512').update(String(session_key)).digest('base64'));//암호화
+    var hash_imei =  (crypto.createHash('sha512').update(String(imei)).digest('base64'));//암호화
 
     //4-2. 지문등록 유무확인 
-    //Error [ERR_HTTP_HEADERS_SENT]: Cannot set headers after they are sent to the client ==> 이거 해결해야함!!
     var sql = "SELECT * FROM hido.key WHERE IMEI = ? AND bankcode = ?";
     connection.query(
         sql,[hash_imei, running], function(error, results){    
@@ -92,12 +85,12 @@ app.get("/registration/fingerprint", function(req, res){//->post로
                 {
                     console.log("REGISTER CHECK - SUCCESS");
                     //지문등록 하기
-                    
+
                     //4. 세션키로 A Bank Server에 CI요청
                     let option = {
                         method : 'POST',
-                        url : "https://127.0.0.1:3000/registration/fingerprint",
-                        json : {"session_key" : session_key}
+                        url : "https://172.30.1.3:443/registration/fingerprint",
+                        json : {"session_key" : hash_session_key }
                     };
 
                     request(option, function (error, response, body) {
@@ -112,37 +105,18 @@ app.get("/registration/fingerprint", function(req, res){//->post로
                             //6. 지문등록 DB에 등록                 
                             var sql2 = "INSERT INTO fingerprint (`CI`, `curBankCode`, `sessionKey`) VALUES (?,?,?)";
                             connection.query(
-                                sql2,[CI, running, session_key],function(error, results2){
+                                sql2,[CI, running, hash_session_key],function(error, results2){
                                     if(error)   throw error;
-                                    else{
-                                        if(results2.length==0){
-                                            console.log("fingerprint DB insert fail");
+                                    else{                                                                       
+                                        console.log("fingerprint DB insert");
+                                        
+                                        var output={
+                                            "mode":"register_check",
+                                            "result":"true"
                                         }
-                                        else
-                                        {                                   
-                                            console.log("fingerprint DB insert");
-                                            //key db 에도 등록
-                                            var sql3 = "INSERT INTO hido.key (`CI`, `bankcode`, `IMEI`) VALUES (?,?,?)";
-                                            connection.query(
-                                                sql3,[CI, running, hash_imei],function(error, results3){
-                                                    if(error)   throw error;
-                                                    else{
-                                                        if(results3.length==0)  console.log("key DB insert fail");
-                                                        else{
-                                                            console.log("key DB insert");
-                                                            console.log("REGISTER CHECK - FAIL");
-
-                                                            var output={
-                                                                "mode":"register_check",
-                                                                "result":"false"
-                                                            }
-                                                            
-                                                            console.log(output);
-                                                            res.send(output);//2
-                                                        }
-                                                    }
-                                                });
-                                        }   
+                                        
+                                        console.log(output);
+                                        res.send(output);//2 
                                     }
                                 });                       
                         }
@@ -168,37 +142,76 @@ app.get("/registration/fingerprint", function(req, res){//->post로
         });
 });
 
-//8.client에서 받은 publicKey 분할 ->추후에 client에서 받아오는 request문 작성해줘야함
+
+//8.client에서 받은 publicKey 분할 ->추후에 client에서 받아오는 request문 작성해줘야함 + 암호화
 app.post("/registration/key", function (req, res) {
-    global.publicKey = 'a1b2c3d4'; //publickey는 client을 거쳐서 넘어옴(우선 임의로 지정)
+    var temp = req.body.public_key;
+    public_key = "-----BEGIN PUBLIC KEY-----"+"\n"+temp+"-----END PUBLIC KEY-----\n"; //publickey는 client을 거쳐서 넘어옴
 
-    if (publicKey != null) {
-        var a = (publicKey.length) / 2;
-        global.publicKeyA = publicKey.substr(0, a); //A는 hidoDB에 저장
-        global.publicKeyB = publicKey.substr(a,); //B는 fidoDB에 저장
+    if (public_key != null) {
+        var a = (public_key.length) / 2;
+        global.publicKeyA = public_key.substr(0, a); //A는 hidoDB에 저장
+        global.publicKeyB = public_key.substr(a,); //B는 fidoDB에 저장
+
+        /*9.db 데이터 추가&삭제
+        DB의 fingerprint table에서 은행코드, Session Key로 검색해서 CI 값 얻기
+        CI와 연결된 PublicKeyA key table에 추가(update)*/
+        console.log("REGISTRATION KEY (HIDO) : "+"Session Key ["+req.body.session_key
+        +"]  Running App Code ["+req.body.running+"]  IMEI ["+req.body.imei+"]  Public Key ["+public_key+"]");
+
+        var session_key = req.body.session_key;
+        var bankcode = req.body.running;
+        var imei = req.body.imei;
+
+        var hash_session_key = (crypto.createHash('sha512').update(String(session_key)).digest('base64'));//암호화
+        var hash_imei =  (crypto.createHash('sha512').update(String(imei)).digest('base64'));//암호화
         
-        } else {
-        console.log("publickey 없음");
-    }
+        //이부분 나중에 변경해야함
 
-    /*9.db 데이터 추가&삭제
-    fingerprint table에서 은행코드, Session Key로 검색해서 CI 값 얻기
-    CI와 연결된 PublicKeyA key table에 추가(update)*/
-
-    if (sessionKey != null && bankcode != null && CI != null) {
-        var sqls = "SELECT * FROM fingerprint WHERE sessionKey = ? AND bankcode = ?;"
-                    +"UPDATE key SET publicKeyA = ? WHERE CI = ?;";
-        connection.query(
-            sqls, [sessionKey, bankcode, publicKeyA, CI], function (error, results) {
+        var sql1 = "SELECT * FROM fingerprint WHERE sessionKey = ? AND curBankCode = ?;"
+        connection.query(sql1, [hash_session_key, bankcode], function (error, results) {
                 if (error) throw error;
                 else {
-                    console.log(results);
-                    var sessionKey = results[0].sessionKey;
-                    var dbBankCode = results[0].bankcode;
+                    //var sessionKey = results[0].sessionKey;
+                    //var dbBankCode = results[0].bankcode;
                     var dbCI = results[0].CI;
+                    console.log('CI 찾았다');
+
+                    var sql2 = "INSERT INTO hido.key (`CI`, `bankcode`, `publicKeyA`, `IMEI`) VALUES (?,?,?,?)"
+                    connection.query(sql2, [dbCI, bankcode, publicKeyA, hash_imei ], function (error, results) {
+                            if (error) {
+                                throw error;
+                            }else {
+
+                                if(results.length==0){
+                                    console.log("REGISTRATION KEY - FAIL");
+                                    var output = {
+                                        "mode": "register_result",
+                                        "result": "false"
+                                    }
+                                    res.send(output);
+                                    
+                                }else{
+                                    console.log("REGISTRATION KEY - SUCCESS");
+                                    var output = {
+                                        "mode": "register_result",
+                                        "result": "true"
+                                    }
+                                    res.send(output);
+
+                                    let option = {
+                                        method : 'GET',
+                                        url : "https://172.30.1.48:443/registration/key",
+                                        json : {"publicKeyB": publicKeyB, "CI": dbCI}
+                                    }
+                                    request(option, function (error, response, body){
+                                        console.log(body);    
+                                    })
+                                }
+                                // res.send(jsonDataTofido); //fido에 CI, publicKeyB를 넘겨줘야함
+                            }
+                    });
                     
-                    var jsonDataTofido = {"publicKeyB": publicKeyB, "CI": dbCI};
-                    res.send(jsonDataTofido); //fido에 CI, publicKeyB를 넘겨줘야함
                 }
             });
     } else {
@@ -208,26 +221,23 @@ app.post("/registration/key", function (req, res) {
 
 /*========================= 지문 인증 프로세스 ======================================*/
 
-
 //6. 사용자 인증
 app.get("/fingerprint/valid", function(req,res){//->post로
     
-    // var sessionKey = req.body.sessionKey;
-    // var imei = req.body.imei;
-    // var running = req.body.running;
-    // var saved = req.body.saved;
+    var session_key = req.body.session_key;
+    var imei = req.body.imei;
+    var running = req.body.running;
+    var saved = req.body.saved;
 
     //var challenge_number = "123456789";
 
-    console.log("FINGERPRINT VAILD - SUCCESS  /  Challenge number ["+challenge_number+"]");
-    console.log("FINGERPRINT VAILD - FAIL  /  Challenge number [NULL]");
+    // //임시값
+    // var session_key = 'test';
+    // var imei = '1234567';
+    // var running = '007';//구동 은행
+    // var saved = '001';//생체 정보가 저장된 은행
 
-    //임시값
-    var session_key = 'test';
-    var imei = '1234567';
-    var running = '007';//구동 은행
-    var saved = '001';//생체 정보가 저장된 은행
-
+    var hash_session_key = (crypto.createHash('sha512').update(String(session_key)).digest('base64'));//암호화
     var hash_imei = (crypto.createHash('sha512').update(String(imei)).digest('base64'));//암호화
 
     console.log("FINGERPRINT VAILD : "+"Session Key ["+req.body.session_key+"]  Running App Code ["+req.body.running+"]  IMEI ["+req.body.imei+"]  Saved Bank code ["+req.body.saved+"]");
@@ -247,14 +257,14 @@ app.get("/fingerprint/valid", function(req,res){//->post로
 
                     //3.지문 등록 확인 결과 및 챌린지 넘버 전송
                     var CI = results[0].CI;
-                    //var randomNum = Math.floor(Math.random()*1000)+1;//랜덤으로 챌린지 넘버 생성 
-                    //var challenge_number=(crypto.createHash('sha512').update(String(randomNum)).digest('base64'));//암호화
-                    var challenge_number = "123456789";//테스트값.
+                    var randomNum = Math.floor(Math.random()*1000)+1;//랜덤으로 챌린지 넘버 생성 
+                    var challenge_number=(crypto.createHash('sha512').update(String(randomNum)).digest('base64'));//암호화
+                    //var challenge_number = "123456789";//테스트값.
 
                     //certification DB 데이터 추가 
                     sql2 = "INSERT INTO certification (`CI`,`useBankCode`,`saveBankCode`, `sessionKey`,`challengeNum`) VALUE (?,?,?,?,?);"
                     connection.query(
-                        sql2,[CI, running, saved, session_key, challenge_number], function(error, results){
+                        sql2,[CI, running, saved, hash_session_key, challenge_number], function(error, results){
                             if(error)   throw error;
                             else{
                                 console.log("FINGERPRINT VAILD - SUCCESS  /  Challenge number ["+challenge_number+"]");
@@ -281,72 +291,6 @@ app.get("/fingerprint/valid", function(req,res){//->post로
 
 });
 
-//11. 사용자 검증 : H(SessionKey)와 구동중인 은행 앱 코드로 인증 DBMS에서
-//H(CI)와 public B가져옴
-app.get("/auth", function(req, res){//->post로
-    // 유저가 HIDO 서버에 지문 인식 요청
-    // input : session_key, imei, running, saved, challenge_number
-
-    //임시값.
-    var sessionKey = 'test';
-    var hash_imei = '1234567';
-    var running = '007';
-    var saved = '001';
-    var challenge_number = 'fVRF7lVZZFvXLbI3oLRIvsZMM8cL4hTpdNp60PUjJ4y7DHfEppD/dRtowxhDfs4q726ylRikHF7IA3IY7W+/DQ==';//243
-
-    var publicKeyB = 'DHfEppD/dRtowxhDfs4q726ylRikHF7IA3IY7W+/DQ==';//임시값
-
-    // 인증 DB에서 [구동 앱 은행 코드 , 세션키] 로 CI 획득해서 7번 먼저 처리
-    sql = "SELECT * FROM certification WHERE useBankCode = ? AND sessionKey = ?";
-    connection.query(
-        sql,[running, sessionKey], function(error, results){
-            if(error)   throw error;
-            else{
-                console.log("검증...");
-
-                var dbUseBankCode = results[0].useBankCode;
-                var dbsessionKey=results[0].sessionKey;
-                var dbchallenge_number = results[0].challengeNum;
-
-                if(dbUseBankCode == running && dbsessionKey == sessionKey){
-                    //CI값 가져오기
-                    var dbCI = results[0].CI;
-
-                    //key db에서 [CI, 생체정보가 저장된 은행 코드] 로 key A 획득 후 키 조합하여 복호화 및 비교
-                    sql2 = "SELECT * FROM hido.key WHERE CI = ? AND bankcode = ?";
-                    connection.query(
-                        sql2, [dbCI, running], function(error, results2){
-                            if(error)   throw error;
-                            else{
-                                var publicKeyA  = results2[0].publicKeyA;
-                                
-                                var publicKey = publicKeyA+publicKeyB;
-                                console.log("publicKey ",publicKey);
-                                // 복호화
-                                // var decipher = crypto.createDecipher('aes192', publicKey); // Decipher 객체 생성
-                                // decipher.update(dbchallenge_number, 'base64', 'utf8');   // 인코딩 방식에 따라 복호화
-                                // var decipheredOutput = decipher.final('utf8');       // 복호화된 결과 값
-                                // console.log(decipheredOutput);
-
-                                //검사는 나중에...ㅠㅠ
-                            }
-                        }); 
-                }
-                else{
-                    console.log("인증 자체가 되지 않았음.");
-                    var output ={
-                        "mode" : "auth" , 
-                        "result" : "false"
-                    };
-                        
-                    console.log(output);
-                }
-            }
-
-        });
-
-});
-
 var httpsServer = https.createServer(credentials, app);
-httpsServer.listen(3002);
+httpsServer.listen(443);
 console.log('Server running');
