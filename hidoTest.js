@@ -7,6 +7,7 @@ const request = require("request");
 var mysql = require("mysql");
 var crypto = require('crypto');
 const aes256 = require('aes256'); // npm install aes256
+var date_utils = require("date-utils"); // npm install data-utils
 
 //promise, pm2, async 사용법
 
@@ -68,16 +69,6 @@ app.post("/registration/fingerprint", function (req, res) {//->post로
     var running = req.body.running;
     var imei = req.body.imei;
 
-    //임시 값.(이미 등록된 지문)
-    // var session_key = 'test';
-    // var running = '007';
-    // var hash_imei = '1234567';
-
-    //임시 값(등록되지 않은 지문)
-    // var session_key = '12345';
-    // var running = '006';
-    // var imei = '9876';//얘는 평문으로 들어옴.
-
     var hash_session_key = (crypto.createHash('sha512').update(String(session_key)).digest('base64'));//암호화
     var hash_imei = (crypto.createHash('sha512').update(String(imei)).digest('base64'));//암호화
 
@@ -94,14 +85,14 @@ app.post("/registration/fingerprint", function (req, res) {//->post로
                     //4. 세션키로 A Bank Server에 CI요청
                     let option = {
                         method: 'POST',
-                        url: "https://172.30.1.3:443/registration/fingerprint",
+                        url: "https://172.30.1.15:443/registration/fingerprint",
                         json: { "session_key": hash_session_key }
                     };
 
                     request(option, function (error, response, body) {
                         // console.error('error:', error);
                         // console.log('statusCode:', response && response.statusCode); 
-                        console.log('body:', body);
+                        //console.log('body:', body);
 
                         if (!error && response.statusCode == 200) {
                             var data = body;
@@ -113,15 +104,15 @@ app.post("/registration/fingerprint", function (req, res) {//->post로
                                 sql2, [CI, running, hash_session_key], function (error, results2) {
                                     if (error) throw error;
                                     else {
-                                        console.log("fingerprint DB insert");
+                                        //console.log("fingerprint DB insert");
 
                                         var output = {
                                             "mode": "register_check",
                                             "result": "true"
                                         }
 
-                                        console.log(output);
-                                        res.send(output);//2 
+                                        //console.log(output);
+                                        res.send(output);
                                     }
                                 });
                         }
@@ -139,7 +130,7 @@ app.post("/registration/fingerprint", function (req, res) {//->post로
                             "result": "false"
                         }
 
-                        console.log(output);
+                        //console.log(output);
                         res.send(output);
                     }
                 }
@@ -153,76 +144,72 @@ app.post("/registration/key", function (req, res) {
     var temp = req.body.public_key;
     public_key = "-----BEGIN PUBLIC KEY-----" + "\n" + temp + "-----END PUBLIC KEY-----\n"; //publickey는 client을 거쳐서 넘어옴
 
-    if (public_key != null) {
-        var a = (public_key.length) / 2;
-        global.publicKeyA = public_key.substr(0, a); //A는 hidoDB에 저장
-        global.publicKeyB = public_key.substr(a,); //B는 fidoDB에 저장
+    var a = (public_key.length) / 2;
+    global.publicKeyA = public_key.substr(0, a); //A는 hidoDB에 저장
+    global.publicKeyB = public_key.substr(a,); //B는 fidoDB에 저장
 
-        /*9.db 데이터 추가&삭제
-        DB의 fingerprint table에서 은행코드, Session Key로 검색해서 CI 값 얻기
-        CI와 연결된 PublicKeyA key table에 추가(update)*/
-        console.log("Server Time ["+ time +"] REGISTRATION KEY (HIDO) : " + "Session Key [" + req.body.session_key
-            + "]  Running App Code [" + req.body.running + "]  IMEI [" + req.body.imei + "]  Public Key [" + public_key + "]");
+    /*9.db 데이터 추가&삭제
+    DB의 fingerprint table에서 은행코드, Session Key로 검색해서 CI 값 얻기
+    CI와 연결된 PublicKeyA key table에 추가(update)*/
+    console.log("Server Time ["+ time +"] REGISTRATION KEY (HIDO) : " + "Session Key [" + req.body.session_key
+        + "]  Running App Code [" + req.body.running + "]  IMEI [" + req.body.imei + "]  Public Key [" + public_key + "]");
 
-        var session_key = req.body.session_key;
-        var bankcode = req.body.running;
-        var imei = req.body.imei;
+    var session_key = req.body.session_key;
+    var bankcode = req.body.running;
+    var imei = req.body.imei;
 
-        var hash_session_key = (crypto.createHash('sha512').update(String(session_key)).digest('base64'));//암호화
-        var hash_imei = (crypto.createHash('sha512').update(String(imei)).digest('base64'));//암호화
+    var hash_session_key = (crypto.createHash('sha512').update(String(session_key)).digest('base64'));//암호화
+    var hash_imei = (crypto.createHash('sha512').update(String(imei)).digest('base64'));//암호화
 
-        var sql1 = "SELECT * FROM fingerprint WHERE sessionKey = ? AND curBankCode = ?;"
-        connection.query(sql1, [hash_session_key, bankcode], function (error, results) {
-            if (error) throw error;
-            else {
-                var dbCI = results[0].CI;
-                console.log('CI 찾았다 -- > ', CI);
+    var sql1 = "SELECT * FROM fingerprint WHERE sessionKey = ? AND curBankCode = ?;"
+    connection.query(sql1, [hash_session_key, bankcode], function (error, results) {
+        if (error) throw error;
+        else {
+            var dbCI = results[0].CI;
+            //console.log('CI 찾았다 -- > ', CI);
 
-                var sql2 = "INSERT INTO hido.key (`CI`, `bankcode`, `publicKeyA`, `IMEI`) VALUES (?,?,?,?)"
-                connection.query(sql2, [dbCI, bankcode, publicKeyA, hash_imei], function (error, results) {
-                    if (error) {
-                        throw error;
-                    } else {
+            var sql2 = "INSERT INTO hido.key (`CI`, `bankcode`, `publicKeyA`, `IMEI`) VALUES (?,?,?,?)"
+            connection.query(sql2, [dbCI, bankcode, publicKeyA, hash_imei], function (error, results) {
+                if (error) {
+                    throw error;
+                } else {
 
-                        if (results.length == 0) {
-                            console.log("Server Time ["+ time +"] REGISTRATION KEY - FAIL");
-                            var output = {
-                                "mode": "register_result",
-                                "result": "false"
-                            }
-                            res.send(output);
-
-                        } else {
-                            console.log("Server Time ["+ time +"] REGISTRATION KEY - SUCCESS");
-                            var output = {
-                                "mode": "register_result",
-                                "result": "true"
-                            }
-                            res.send(output);
-
-                            let option = {
-                                method: 'GET',
-                                url: "https://172.30.1.48:443/registration/key",
-                                json: { "publicKeyB": publicKeyB, "CI": dbCI }
-                            }
-                            request(option, function (error, response, body) {
-                                console.log(body);
-                            })
+                    if (results.length == 0) {
+                        console.log("Server Time ["+ time +"] REGISTRATION KEY - FAIL");
+                        var output = {
+                            "mode": "register_key",
+                            "result": "false"
                         }
-                    }
-                });
+                        res.send(output);
 
-            }
-        });
-    } else {
-        console.log("error");
-    }
+                    } else {
+                        console.log("Server Time ["+ time +"] REGISTRATION KEY - SUCCESS");
+                        var output = {
+                            "mode": "register_key",
+                            "result": "true"
+                        }
+                        res.send(output);
+
+                        let option = {
+                            method: 'GET',
+                            url: "https://172.30.1.21:443/registration/key",
+                            json: { "publicKeyB": publicKeyB, "CI": dbCI }
+                        }
+                        request(option, function (error, response, body) {
+                            //console.log(body);
+                        })
+                    }
+                }
+            });
+
+        }
+    });
 });
 
 /*========================= 지문 인증 프로세스 ======================================*/
 
 //6. 사용자 인증
-app.get("/fingerprint/valid", function (req, res) {
+app.post("/fingerprint/valid", function (req, res) {
 
     var session_key = req.body.session_key;
     var imei = req.body.imei;
@@ -243,9 +230,7 @@ app.get("/fingerprint/valid", function (req, res) {
                 //2.지문정보 확인
                 var dbimei = results[0].IMEI;
                 var dbBankCode = results[0].bankcode;
-                if (dbimei == hash_imei && dbBankCode == running) {
-                    console.log("지문은 등록 되어있음.");
-
+                if (dbimei == hash_imei && dbBankCode == saved) {
                     // //3.지문 등록 확인 결과 및 챌린지 넘버 전송
                     var CI = results[0].CI;
 
@@ -255,39 +240,24 @@ app.get("/fingerprint/valid", function (req, res) {
                     connection.query(sql_check,[running, hash_session_key], function(error, results){
                         if(error)   throw error;
                         else{
-                            if(results.length==0)
-                            {
-                                console.log("지문 등록은 되어있지만, 지문 인증dbms에는 아직 없다.");
-                                var randomNum = String(Math.floor(Math.random() * 1000) + 1);//랜덤으로 챌린지 넘버 생성 
-                                global.key = "fido";
-                                var enChallengeNum = aes256.encrypt(key,randomNum); // 개인키로 암호화
-                                console.log('enChallengeNum : ',enChallengeNum);
+                            var randomNum = String(Math.floor(Math.random() * 1000) + 1);//랜덤으로 챌린지 넘버 생성 
+                            global.key = "fido";
+                            var enChallengeNum = aes256.encrypt(key,randomNum); // 개인키로 암호화
+                            //('enChallengeNum : ',enChallengeNum);
 
-                                sql2 = "INSERT INTO certification (`CI`,`useBankCode`,`saveBankCode`, `sessionKey`,`challengeNum`) VALUE (?,?,?,?,?);"
-                                connection.query(sql2, [CI, running, saved, hash_session_key, enChallengeNum], function (error, results) {
-                                        if (error) throw error;
-                                        else {
-                                            console.log("Server Time ["+ time +"] FINGERPRINT VAILD - SUCCESS  /  Challenge number [" + enChallengeNum + "]");
-                                            var output = {
-                                                "mode": "fingerprint_valid",
-                                                "result": "true",
-                                                "challenge_number": randomNum
-                                            };
-                                            res.send(output);
-                                        }
-                                    });
-                            }
-                            else{
-                                console.log("이미 인증된 지문입니다.");//db에서 challengeNum값만 가져와서 전달해준다.
-                                var dbchallengeNum = results[0].challengeNum;
-                                console.log("Server Time ["+ time +"] FINGERPRINT VAILD - SUCCESS  /  Challenge number [" + dbchallengeNum + "]");
-                                var output = {
-                                    "mode": "fingerprint_valid",
-                                    "result": "true",
-                                    "challenge_number": dbchallengeNum
-                                };
-                                res.send(output);
-                            }
+                            sql2 = "INSERT INTO certification (`CI`,`useBankCode`,`saveBankCode`, `sessionKey`,`challengeNum`) VALUE (?,?,?,?,?);"
+                            connection.query(sql2, [CI, running, saved, hash_session_key, enChallengeNum], function (error, results) {
+                                    if (error) throw error;
+                                    else {
+                                        console.log("Server Time ["+ time +"] FINGERPRINT VAILD - SUCCESS  /  Challenge number [" + enChallengeNum + "]");
+                                        var output = {
+                                            "mode": "fingerprint_valid",
+                                            "result": "true",
+                                            "challenge_number": randomNum
+                                        };
+                                        res.send(output);
+                                    }
+                                });
                         }
                     });
                 }
@@ -322,97 +292,100 @@ app.post("/auth", function (req, res) {
             var CI = results[0].CI;
             let option = {
                 method: 'POST',
-                url: "https://172.30.1.48:443/auth",
+                url: "https://172.30.1.21:443/auth",
                 json: { "CI": CI }
             };
 
             request(option, function (error, response, body) {
-                console.log('body:', body);
-
                 if (!error && response.statusCode == 200) {
                     var data = body;
-                    console.log(data);
                     //이미 다 hash된 값이 넘어옴.
                     var publicKeyB = data.publicKeyB;
 
-                    if (CI != null) {//KeyDB에서 CI,useBankCode로 KeyA 획득
-                        var sql = "SELECT * FROM hido.key WHERE CI = ? AND bankcode = ?";
-                        connection.query(sql, [CI, running], function (error, results) {
-                            if (error) throw error;
-                            else {
-                                var publicKeyA = results[0].publicKeyA;
-                                var publicKey = publicKeyA + publicKeyB//KeyA+keyB로 완벽한 publicKey 획득
-                                console.log(publicKey);
+                    //KeyDB에서 CI,useBankCode로 KeyA 획득
+                    var sql = "SELECT * FROM hido.key WHERE CI = ? AND bankcode = ?";
+                    connection.query(sql, [CI, running], function (error, results) {
+                        if (error) throw error;
+                        else {
+                            var publicKeyA = results[0].publicKeyA;
+                            var publicKey = publicKeyA + publicKeyB//KeyA+keyB로 완벽한 publicKey 획득
+                            //console.log(publicKey);
 
-                                var sql2 = "SELECT * FROM certification WHERE CI = ? AND useBankCode = ?";
-                                connection.query(sql2, [CI, running], function (error, results) {
-                                    if (error) throw error;
-                                    else {         
-                                        var dbchallengeNum = results[0].challengeNum;
-                                        var pu = fs.readFileSync('./keys/pu.pem', 'utf-8');
-                                        var deChallengeNum = aes256.decrypt(key,dbchallengeNum);
-                                        console.log("deChallengeNum : " + deChallengeNum.toString() + "\n");
+                            var sql2 = "SELECT * FROM certification WHERE CI = ? AND useBankCode = ?";
+                            connection.query(sql2, [CI, running], function (error, results) {
+                                if (error) throw error;
+                                else {         
+                                    var dbchallengeNum = results[0].challengeNum;
+                                    var pu = fs.readFileSync('./keys/pu.pem', 'utf-8');
+                                    var deChallengeNum = aes256.decrypt(key,dbchallengeNum);
+                                    //console.log("deChallengeNum : " + deChallengeNum.toString() + "\n");
 
-                                        if (publicKeyB != null) {//publickeyB를 certDB에 저장(인증후 삭제)
-                                            var sql = "UPDATE hido.key SET publicKeyB = ? WHERE CI = ?";
-                                            connection.query(sql, [publicKeyB, CI], function (error, results) {
+                                    //publickeyB를 certDB에 저장(인증후 삭제)
+                                    var sql = "UPDATE hido.key SET publicKeyB = ? WHERE CI = ?";
+                                    connection.query(sql, [publicKeyB, CI], function (error, results) {
+                                        if (error) throw error;
+                                        else {
+                                            //console.log("update key table");
+
+                                            /*챌린지넘버 복호화 후, 해시시켜서 certDB에 저장된 챌린지넘버와 비교
+                                            HIDO 서버가 bankapp서버에 인증 결과 전송 */
+                                        
+                                            var sql = "SELECT * FROM certification WHERE CI = ?";
+                                            connection.query(sql, [CI], function (error, results) {
                                                 if (error) throw error;
-                                                else {
-                                                    console.log("update key table");
+                                                else {                                                         
+                                                    const verifier = crypto.createVerify('sha256WithRSAEncryption');
+                                                    verifier.update(deChallengeNum);
+                                                    if (verifier.verify(publicKey, Buffer.from(signChallengeNum,'base64'))) {
 
-                                                    /*챌린지넘버 복호화 후, 해시시켜서 certDB에 저장된 챌린지넘버와 비교
-                                                    HIDO 서버가 bankapp서버에 인증 결과 전송 */
-                                                   
-                                                    var sql = "SELECT * FROM certification WHERE CI = ?";
-                                                    connection.query(sql, [CI], function (error, results) {
-                                                        if (error) throw error;
-                                                        else {                                                         
-                                                            const verifier = crypto.createVerify('sha256WithRSAEncryption');
-                                                            verifier.update(deChallengeNum);
-                                                            if (verifier.verify(publicKey, Buffer.from(signChallengeNum,'base64'))) {
-                                                                console.log("Server Time ["+ time +"] AUTHENTICATION & TRANSFER: " + "Session Key [" + sessionKey + "]  Use App Code [" + useBankCode
-                                                                    + "]  IMEI [" + hash_IMEI + "]  Saved Bank code [" + saveBankCode + "]  Challenge number [" + challengeNum + "]");
+                                                        console.log("Server Time ["+ time +"] AUTHENTICATION & TRANSFER: " + "Session Key [" + session_key + "]  Use App Code [" + running
+                                                            + "]  IMEI [" + imei + "]  Saved Bank code [" + saved + "]  Challenge number [" + req.body.challenge_number + "]");
 
-                                                                sql2 = "UPDATE hido.key SET publicKeyB = ? WHERE CI = ?"
-                                                                connection.query(sql2, [" ", CI], function (error, results) {
-                                                                    if (error) throw error;
-                                                                    else {                                                                        
-                                                                        console.log("publicKeyB destoryed");
-                                                                    }
-                                                                });
-
-                                                                var output = {
-                                                                    "mode": "auth",
-                                                                    "result": "true"
-                                                                }
-                                                                res.send(output);
-                                                            } else {
-                                                                console.log("Server Time ["+ time +"] AUTHENTICATION - FAIL");
-                                                                var output = {
-                                                                    "mode": "auth",
-                                                                    "result": "false"
-                                                                }
-                                                                res.send(output);
+                                                        sql2 = "UPDATE hido.key SET publicKeyB = ? WHERE CI = ?"
+                                                        connection.query(sql2, [" ", CI], function (error, results) {
+                                                            if (error) throw error;
+                                                            else {                                                                        
+                                                                //("publicKeyB destoryed");
                                                             }
+                                                        });
+
+                                                        var output = {
+                                                            "mode": "auth",
+                                                            "result": "true"
                                                         }
-                                                    });
-                                                }})
-                                        } else {
-                                            console.log("publickeyB 없음");
+                                                        res.send(output);
+                                                    } else {
+                                                        console.log("Server Time ["+ time +"] AUTHENTICATION - FAIL");
+                                                        var output = {
+                                                            "mode": "auth",
+                                                            "result": "false"
+                                                        }
+                                                        res.send(output);
+                                                    }
+                                                }
+                                            });
                                         }
-                                    }
-                                });
-                                    }
-                                });
-                            } 
-                            else { console.log("CI없음"); }           
-                }
-            });
-                    
+                                    });
+                                }
+                            });
+                        }
+                    });
+                } 
+            });                   
         }
-    })
+    });
+
+     //인증 DB는 끝나고 제거
+     sql3 = "UPDATE certification SET CI = ? AND useBankCode = ? AND saveBankCode=? AND sessionKey = ? WHERE challengeNum = ?"
+     connection.query(sql3, [" ", " "," "," "," "], function (error, results) {
+         if (error) throw error;
+         else {                                                                        
+             //console.log("certification db data delete");
+         }
+     });
+
 });
 
 var httpsServer = https.createServer(credentials, app);
 httpsServer.listen(443);
-console.log('Server running');
+console.log('Hido Server running');
