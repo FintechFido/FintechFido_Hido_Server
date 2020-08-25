@@ -90,10 +90,6 @@ app.post("/registration/fingerprint", function (req, res) {//->post로
                     };
 
                     request(option, function (error, response, body) {
-                        // console.error('error:', error);
-                        // console.log('statusCode:', response && response.statusCode); 
-                        //console.log('body:', body);
-
                         if (!error && response.statusCode == 200) {
                             var data = body;
                             var CI = data.CI;//이미 암호화된 값.
@@ -224,44 +220,12 @@ app.post("/fingerprint/valid", function (req, res) {
     //1.지문등록 유무 확인
     sql = "SELECT * FROM hido.key WHERE IMEI = ? AND bankcode = ? ";
     connection.query(
-        sql, [hash_imei, running], function (error, results) {
+        sql, [hash_imei, saved], function (error, results) {
             if (error) throw error;
             else {
-                //2.지문정보 확인
-                var dbimei = results[0].IMEI;
-                var dbBankCode = results[0].bankcode;
-                if (dbimei == hash_imei && dbBankCode == saved) {
-                    // //3.지문 등록 확인 결과 및 챌린지 넘버 전송
-                    var CI = results[0].CI;
-
-                    //certification DB 데이터 추가 
-                    //session_key와 running으로 조회 : db에 없으면 추가 후 결과 true 반환, 이미 존재하면 이미 그건 지문등록 된 거 챌린지 넘버 조회해서 반환
-                    sql_check = "SELECT * FROM certification WHERE useBankCode = ? AND sessionKey = ?";
-                    connection.query(sql_check,[running, hash_session_key], function(error, results){
-                        if(error)   throw error;
-                        else{
-                            var randomNum = String(Math.floor(Math.random() * 1000) + 1);//랜덤으로 챌린지 넘버 생성 
-                            global.key = "fido";
-                            var enChallengeNum = aes256.encrypt(key,randomNum); // 개인키로 암호화
-                            //('enChallengeNum : ',enChallengeNum);
-
-                            sql2 = "INSERT INTO certification (`CI`,`useBankCode`,`saveBankCode`, `sessionKey`,`challengeNum`) VALUE (?,?,?,?,?);"
-                            connection.query(sql2, [CI, running, saved, hash_session_key, enChallengeNum], function (error, results) {
-                                    if (error) throw error;
-                                    else {
-                                        console.log("Server Time ["+ time +"] FINGERPRINT VAILD - SUCCESS  /  Challenge number [" + enChallengeNum + "]");
-                                        var output = {
-                                            "mode": "fingerprint_valid",
-                                            "result": "true",
-                                            "challenge_number": randomNum
-                                        };
-                                        res.send(output);
-                                    }
-                                });
-                        }
-                    });
-                }
-                else {
+                //IMEI가 없는 경우, running = 2, saved = 2 -> DB에 데이터가 없음.
+                if(result.length==0)
+                {
                     console.log("Server Time ["+ time +"] FINGERPRINT VAILD - FAIL  /  Challenge number [NULL]");
                     var output = {
                         "mode": "fingerprint_valid",
@@ -269,6 +233,52 @@ app.post("/fingerprint/valid", function (req, res) {
                         "challenge_number": null
                     };
                     res.send(output);
+                }
+                else{          
+                    //2.지문정보 확인
+                    var dbimei = results[0].IMEI;
+                    var dbBankCode = results[0].bankcode;
+
+                    if (dbimei == hash_imei && dbBankCode == saved) {
+                        // //3.지문 등록 확인 결과 및 챌린지 넘버 전송
+                        var CI = results[0].CI;
+
+                        //certification DB 데이터 추가 
+                        //session_key와 running으로 조회 : db에 없으면 추가 후 결과 true 반환, 이미 존재하면 이미 그건 지문등록 된 거 챌린지 넘버 조회해서 반환
+                        sql_check = "SELECT * FROM certification WHERE useBankCode = ? AND sessionKey = ?";
+                        connection.query(sql_check,[running, hash_session_key], function(error, results){
+                            if(error)   throw error;
+                            else{
+                                var randomNum = String(Math.floor(Math.random() * 1000) + 1);//랜덤으로 챌린지 넘버 생성 
+                                global.key = "fido";
+                                var enChallengeNum = aes256.encrypt(key,randomNum); // 개인키로 암호화
+                                //('enChallengeNum : ',enChallengeNum);
+
+                                sql2 = "INSERT INTO certification (`CI`,`useBankCode`,`saveBankCode`, `sessionKey`,`challengeNum`) VALUE (?,?,?,?,?);"
+                                connection.query(sql2, [CI, running, saved, hash_session_key, enChallengeNum], function (error, results) {
+                                        if (error) throw error;
+                                        else {
+                                            console.log("Server Time ["+ time +"] FINGERPRINT VAILD - SUCCESS  /  Challenge number [" + randomNum + "]");
+                                            var output = {
+                                                "mode": "fingerprint_valid",
+                                                "result": "true",
+                                                "challenge_number": randomNum
+                                            };
+                                            res.send(output);
+                                        }
+                                    });
+                            }
+                        });
+                    }
+                    else {
+                        console.log("Server Time ["+ time +"] FINGERPRINT VAILD - FAIL  /  Challenge number [NULL]");
+                        var output = {
+                            "mode": "fingerprint_valid",
+                            "result": "false",
+                            "challenge_number": null
+                        };
+                        res.send(output);
+                    }
                 }
             }
         });
@@ -283,6 +293,10 @@ app.post("/auth", function (req, res) {
     var saved = req.body.saved;
     var signChallengeNum = req.body.challenge_number;
     var hash_session_key = (crypto.createHash('sha512').update(String(session_key)).digest('base64')); //해시
+    //var hash_imei = (crypto.createHash('sha512').update(String(imei)).digest('base64'));
+
+    console.log("Server Time ["+ time +"] AUTHENTICATION & TRANSFER: " + "Session Key [" + session_key + "]  Use App Code [" + running
+    + "]  IMEI [" + imei + "]  Saved Bank code [" + saved + "]  Challenge number [" + signChallengeNum + "]");
 
     //certificationDB에서 useBankCode, sessionKey 검색해서 CI획득
     var sql = "SELECT * FROM certification WHERE useBankCode = ? AND sessionKey = ?";
@@ -302,9 +316,9 @@ app.post("/auth", function (req, res) {
                     //이미 다 hash된 값이 넘어옴.
                     var publicKeyB = data.publicKeyB;
 
-                    //KeyDB에서 CI,useBankCode로 KeyA 획득
+                    //KeyDB에서 CI, saved로 KeyA 획득
                     var sql = "SELECT * FROM hido.key WHERE CI = ? AND bankcode = ?";
-                    connection.query(sql, [CI, running], function (error, results) {
+                    connection.query(sql, [CI, saved], function (error, results) {
                         if (error) throw error;
                         else {
                             var publicKeyA = results[0].publicKeyA;
@@ -338,14 +352,20 @@ app.post("/auth", function (req, res) {
                                                     verifier.update(deChallengeNum);
                                                     if (verifier.verify(publicKey, Buffer.from(signChallengeNum,'base64'))) {
 
-                                                        console.log("Server Time ["+ time +"] AUTHENTICATION & TRANSFER: " + "Session Key [" + session_key + "]  Use App Code [" + running
-                                                            + "]  IMEI [" + imei + "]  Saved Bank code [" + saved + "]  Challenge number [" + req.body.challenge_number + "]");
-
                                                         sql2 = "UPDATE hido.key SET publicKeyB = ? WHERE CI = ?"
                                                         connection.query(sql2, [" ", CI], function (error, results) {
                                                             if (error) throw error;
                                                             else {                                                                        
                                                                 //("publicKeyB destoryed");
+                                                            }
+                                                        });
+
+                                                        //인증 DB는 끝나고 제거
+                                                        sql3 = "UPDATE certification SET CI = ? AND useBankCode = ? AND saveBankCode=? AND sessionKey = ? WHERE challengeNum = ?"
+                                                        connection.query(sql3, [" ", " "," "," "," "], function (error, results) {
+                                                            if (error) throw error;
+                                                            else {                                                                        
+                                                                //console.log("certification db data delete");
                                                             }
                                                         });
 
@@ -374,16 +394,6 @@ app.post("/auth", function (req, res) {
             });                   
         }
     });
-
-     //인증 DB는 끝나고 제거
-     sql3 = "UPDATE certification SET CI = ? AND useBankCode = ? AND saveBankCode=? AND sessionKey = ? WHERE challengeNum = ?"
-     connection.query(sql3, [" ", " "," "," "," "], function (error, results) {
-         if (error) throw error;
-         else {                                                                        
-             //console.log("certification db data delete");
-         }
-     });
-
 });
 
 var httpsServer = https.createServer(credentials, app);
