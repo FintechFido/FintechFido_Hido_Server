@@ -61,8 +61,7 @@ app.get("/", function (req, res) {
 });
 
 //4-1. 지문등록 유무 확인 요청
-app.post("/registration/fingerprint", function (req, res) {//->post로
-
+app.post("/registration/fingerprint", function (req, res) {
     console.log("Server Time ["+ time +"] REGISTER CHECK : " + "Session Key [" + req.body.session_key + "]  Running App Code [" + req.body.running + "]  IMEI [" + req.body.imei + "]");
 
     var session_key = req.body.session_key;
@@ -81,11 +80,10 @@ app.post("/registration/fingerprint", function (req, res) {//->post로
                 if (results.length == 0) {
                     console.log("Server Time ["+ time +"] REGISTER CHECK - SUCCESS");
                     //지문등록 하기
-
                     //4. 세션키로 A Bank Server에 CI요청
                     let option = {
                         method: 'POST',
-                        url: "https://172.30.1.15:443/registration/fingerprint",
+                        url: "https://localhost:3000/registration/fingerprint",
                         json: { "session_key": hash_session_key }
                     };
 
@@ -101,12 +99,10 @@ app.post("/registration/fingerprint", function (req, res) {//->post로
                                     if (error) throw error;
                                     else {
                                         //console.log("fingerprint DB insert");
-
                                         var output = {
                                             "mode": "register_check",
                                             "result": "true"
                                         }
-
                                         //console.log(output);
                                         res.send(output);
                                     }
@@ -188,7 +184,7 @@ app.post("/registration/key", function (req, res) {
 
                         let option = {
                             method: 'GET',
-                            url: "https://172.30.1.21:443/registration/key",
+                            url: "https://localhost:3002/registration/key",
                             json: { "publicKeyB": publicKeyB, "CI": dbCI }
                         }
                         request(option, function (error, response, body) {
@@ -224,7 +220,7 @@ app.post("/fingerprint/valid", function (req, res) {
             if (error) throw error;
             else {
                 //IMEI가 없는 경우, running = 2, saved = 2 -> DB에 데이터가 없음.
-                if(result.length==0)
+                if(results.length==0)
                 {
                     console.log("Server Time ["+ time +"] FINGERPRINT VAILD - FAIL  /  Challenge number [NULL]");
                     var output = {
@@ -306,7 +302,7 @@ app.post("/auth", function (req, res) {
             var CI = results[0].CI;
             let option = {
                 method: 'POST',
-                url: "https://172.30.1.21:443/auth",
+                url: "https://localhost:3002/auth",
                 json: { "CI": CI }
             };
 
@@ -357,23 +353,22 @@ app.post("/auth", function (req, res) {
                                                             if (error) throw error;
                                                             else {                                                                        
                                                                 //("publicKeyB destoryed");
+
+                                                                //인증 DB는 끝나고 제거
+                                                                sql3 = "DELETE FROM certification WHERE CI =? AND useBankCode= ?"
+                                                                connection.query(sql3, [CI, running], function (error, results) {
+                                                                    if (error) throw error;
+                                                                    else {                                                                        
+                                                                        //console.log("certification db data delete");
+                                                                        var output = {
+                                                                            "mode": "auth",
+                                                                            "result": "true"
+                                                                        }
+                                                                        res.send(output);
+                                                                    }
+                                                                });
                                                             }
                                                         });
-
-                                                        //인증 DB는 끝나고 제거
-                                                        sql3 = "UPDATE certification SET CI = ? AND useBankCode = ? AND saveBankCode=? AND sessionKey = ? WHERE challengeNum = ?"
-                                                        connection.query(sql3, [" ", " "," "," "," "], function (error, results) {
-                                                            if (error) throw error;
-                                                            else {                                                                        
-                                                                //console.log("certification db data delete");
-                                                            }
-                                                        });
-
-                                                        var output = {
-                                                            "mode": "auth",
-                                                            "result": "true"
-                                                        }
-                                                        res.send(output);
                                                     } else {
                                                         console.log("Server Time ["+ time +"] AUTHENTICATION - FAIL");
                                                         var output = {
@@ -397,5 +392,5 @@ app.post("/auth", function (req, res) {
 });
 
 var httpsServer = https.createServer(credentials, app);
-httpsServer.listen(443);
+httpsServer.listen(3001);
 console.log('Hido Server running');
